@@ -1,0 +1,21 @@
+# Environment variables
+.env
+
+# Google Service Account Credentials
+credentials.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+
+# Scratch/Dump files
+scratch_dump*.py
+dump_html.py
+test_html.py
+check_playwright.py
+*.html
+*.png
