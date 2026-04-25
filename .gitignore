@@ -19,3 +19,4 @@ test_html.py
 check_playwright.py
 *.html
 *.png
+run_log.txt

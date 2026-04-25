@@ -55,105 +55,113 @@ def main():
             page.wait_for_load_state("networkidle")
             page.wait_for_timeout(1000)
             
-            # --- 表示件数(100)の変更 ---
-            # JavaScriptのonchangeで自動submitされるため
-            print("-> 表示件数を100件に変更します...")
-            page.locator('select[name="WRTCOUNT"]').first.select_option('100')
-            page.wait_for_load_state("networkidle")
-            page.wait_for_timeout(2000)
-            
-            # --- 出版年の降順(SORT=-3)に変更 ---
-            # 出版年横の「↓」リンクをクリック
-            print("-> 出版年降順で並び替えます...")
-            page.locator('a[href*="SORT=-3"]').first.click()
-            page.wait_for_load_state("networkidle")
-            page.wait_for_timeout(2000)
-            
-            # --- データ抽出ループ ---
-            print("-> データの抽出を開始します...")
-            current_page = 1
-            while True:
-                print(f"  - ページ {current_page} を処理中...")
+            # --- 新着図書の有無を確認 ---
+            if page.locator('select[name="WRTCOUNT"]').count() > 0:
+                # --- 表示件数(100)の変更 ---
+                # JavaScriptのonchangeで自動submitされるため
+                print("-> 表示件数を100件に変更します...")
+                page.locator('select[name="WRTCOUNT"]').first.select_option('100')
+                page.wait_for_load_state("networkidle")
+                page.wait_for_timeout(2000)
                 
-                rows = page.locator('tr.lightcolor, tr.basecolor').all()
-                for row in rows:
-                    tds = row.locator('td').all()
-                    if len(tds) >= 6:
-                        date_text = tds[0].inner_text().strip()
-                        title = tds[2].inner_text().strip()
-                        author = tds[3].inner_text().strip()
-                        publisher = tds[4].inner_text().strip()
-                        year = tds[5].inner_text().strip()
-                        
-                        # 整形（改行や余分な空白の削除）
-                        date_text = re.sub(r'\s+', ' ', date_text)
-                        title = re.sub(r'\s+', ' ', title)
-                        author = re.sub(r'\s+', ' ', author)
-                        publisher = re.sub(r'\s+', ' ', publisher)
-                        year = re.sub(r'\s+', ' ', year)
-                        
-                        if title: # タイトルが空でない場合のみ
-                            res_list.append([date_text, title, author, publisher, year])
+                # --- 出版年の降順(SORT=-3)に変更 ---
+                # 出版年横の「↓」リンクをクリック
+                print("-> 出版年降順で並び替えます...")
+                if page.locator('a[href*="SORT=-3"]').count() > 0:
+                    page.locator('a[href*="SORT=-3"]').first.click()
+                    page.wait_for_load_state("networkidle")
+                    page.wait_for_timeout(2000)
                 
-                # 「次」ページへのリンクがあるか確認
-                next_links = page.locator('a:has-text("次")')
-                if next_links.count() > 0:
-                    try:
-                        next_links.first.click()
-                        page.wait_for_load_state("networkidle")
-                        page.wait_for_timeout(1500)
-                        current_page += 1
-                    except Exception as e:
-                        print(f"次のページへの遷移中にエラーが発生しました、ループを終了します。: {e}")
+                # --- データ抽出ループ ---
+                print("-> データの抽出を開始します...")
+                current_page = 1
+                while True:
+                    print(f"  - ページ {current_page} を処理中...")
+                    
+                    rows = page.locator('tr.lightcolor, tr.basecolor').all()
+                    for row in rows:
+                        tds = row.locator('td').all()
+                        if len(tds) >= 6:
+                            date_text = tds[0].inner_text().strip()
+                            title = tds[2].inner_text().strip()
+                            author = tds[3].inner_text().strip()
+                            publisher = tds[4].inner_text().strip()
+                            year = tds[5].inner_text().strip()
+                            
+                            # 整形（改行や余分な空白の削除）
+                            date_text = re.sub(r'\s+', ' ', date_text)
+                            title = re.sub(r'\s+', ' ', title)
+                            author = re.sub(r'\s+', ' ', author)
+                            publisher = re.sub(r'\s+', ' ', publisher)
+                            year = re.sub(r'\s+', ' ', year)
+                            
+                            if title: # タイトルが空でない場合のみ
+                                res_list.append([date_text, title, author, publisher, year])
+                    
+                    # 「次」ページへのリンクがあるか確認
+                    next_links = page.locator('a:has-text("次")')
+                    if next_links.count() > 0:
+                        try:
+                            next_links.first.click()
+                            page.wait_for_load_state("networkidle")
+                            page.wait_for_timeout(1500)
+                            current_page += 1
+                        except Exception as e:
+                            print(f"次のページへの遷移中にエラーが発生しました、ループを終了します。: {e}")
+                            break
+                    else:
                         break
-                else:
-                    break
+            else:
+                print("-> 新着図書が存在しません。データの抽出をスキップします。")
                     
             # --- 読書記録の抽出 ---
-            print("-> 読書記録データの抽出を開始します...")
             rec_list = []
-            page.get_by_text("利用状況ページ", exact=False).first.click()
-            page.wait_for_timeout(1000)
-            page.get_by_text("利用状況一覧", exact=False).first.click()
-            page.wait_for_load_state("networkidle")
-            page.wait_for_timeout(2000)
+            if len(res_list) > 0:
+                print("-> 読書記録データの抽出を開始します...")
+                page.get_by_text("利用状況ページ", exact=False).first.click()
+                page.wait_for_timeout(1000)
+                page.get_by_text("利用状況一覧", exact=False).first.click()
+                page.wait_for_load_state("networkidle")
+                page.wait_for_timeout(2000)
 
-            page.locator('a[href="#ContentRec"]').first.click()
-            page.wait_for_timeout(1000)
-            
-            current_page_rec = 1
-            while True:
-                print(f"  - 読書記録 ページ {current_page_rec} を処理中...")
-                form_rec = page.locator('form[name="FormREC"]')
-                rows = form_rec.locator('tr.lightcolor, tr.basecolor').all()
-                for row in rows:
-                    tds = row.locator('td').all()
-                    if len(tds) >= 7:
-                        no = tds[1].inner_text().strip()
-                        title = tds[3].inner_text().strip()
-                        author = tds[4].inner_text().strip()
-                        date_val = tds[6].inner_text().strip()
-                        
-                        no = re.sub(r'\s+', ' ', no)
-                        title = re.sub(r'\s+', ' ', title)
-                        author = re.sub(r'\s+', ' ', author)
-                        date_val = re.sub(r'\s+', ' ', date_val)
-                        
-                        if no and title:
-                            rec_list.append([no, title, author, date_val])
+                page.locator('a[href="#ContentRec"]').first.click()
+                page.wait_for_timeout(1000)
                 
-                next_links = form_rec.locator('a:has-text("次")')
-                if next_links.count() > 0:
-                    try:
-                        next_links.first.click()
-                        page.wait_for_load_state("networkidle")
-                        page.wait_for_timeout(1500)
-                        current_page_rec += 1
-                    except Exception as e:
-                        print(f"読書記録の次のページへの遷移中にエラーが発生しました: {e}")
+                current_page_rec = 1
+                while True:
+                    print(f"  - 読書記録 ページ {current_page_rec} を処理中...")
+                    form_rec = page.locator('form[name="FormREC"]')
+                    rows = form_rec.locator('tr.lightcolor, tr.basecolor').all()
+                    for row in rows:
+                        tds = row.locator('td').all()
+                        if len(tds) >= 7:
+                            no = tds[1].inner_text().strip()
+                            title = tds[3].inner_text().strip()
+                            author = tds[4].inner_text().strip()
+                            date_val = tds[6].inner_text().strip()
+                            
+                            no = re.sub(r'\s+', ' ', no)
+                            title = re.sub(r'\s+', ' ', title)
+                            author = re.sub(r'\s+', ' ', author)
+                            date_val = re.sub(r'\s+', ' ', date_val)
+                            
+                            if no and title:
+                                rec_list.append([no, title, author, date_val])
+                    
+                    next_links = form_rec.locator('a:has-text("次")')
+                    if next_links.count() > 0:
+                        try:
+                            next_links.first.click()
+                            page.wait_for_load_state("networkidle")
+                            page.wait_for_timeout(1500)
+                            current_page_rec += 1
+                        except Exception as e:
+                            print(f"読書記録の次のページへの遷移中にエラーが発生しました: {e}")
+                            break
+                    else:
                         break
-                else:
-                    break
+            else:
+                print("-> 新着図書が0件のため、読書記録のデータ抽出もスキップします。")
 
         except Exception as e:
             print(f"ブラウザ操作中にエラーが発生しました: {e}")
@@ -163,12 +171,9 @@ def main():
         browser.close()
         
     print(f"-> スクレイピング完了: 計 {len(res_list)} 件の図書データを取得しました。")
-    if not res_list:
-        print("-> 取得データが0件のため、スプレッドシートへの書き込み処理をスキップします。")
-        return
 
-    # --- Spreadsheet 書き込み ---
-    print("-> 2. Google SpreadSheet への書き込みを開始します")
+    # --- Spreadsheet 書き込み・クリア ---
+    print("-> 2. Google SpreadSheet への接続を開始します")
     try:
         scopes = [
             'https://www.googleapis.com/auth/spreadsheets',
@@ -194,6 +199,12 @@ def main():
             worksheet = sh.worksheet("シート1")
         except gspread.exceptions.WorksheetNotFound:
             print("エラー: 'シート1' という名前のシートが見つかりません。")
+            return
+            
+        if not res_list:
+            print("-> 新着図書が0件のため、スプレッドシートの中身を全て削除してプログラムを終了します。")
+            worksheet.clear()
+            print("★ 完了: 新着案内のスプレッドシートのデータを削除しました。")
             return
             
         print("-> 古いデータを削除しています...")
