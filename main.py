@@ -1,10 +1,16 @@
 import os
 import re
 import time
+import json
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from playwright.sync_api import sync_playwright
 import gspread
 from google.oauth2.service_account import Credentials
 from dotenv import load_dotenv
+from google import genai
+from google.genai import types
 
 def main():
     # .envファイルから環境変数を読み込む
@@ -15,6 +21,7 @@ def main():
     # 環境変数から機密情報を取得
     library_id = os.environ.get("LIBRARY_LOGIN_ID")
     library_pw = os.environ.get("LIBRARY_PASSWORD")
+    gemini_api_key = os.environ.get("GEMINI_API_KEY")
     
     if not library_id or not library_pw:
         print("エラー: .envファイルに LIBRARY_LOGIN_ID または LIBRARY_PASSWORD が設定されていません。")
@@ -248,7 +255,154 @@ def main():
             
             rec_worksheet.append_rows(rec_list, value_input_option='USER_ENTERED')
             print(f"★ 完了: 読書記録のスプレッドシートのデータを新しく書き換えました！")
+            
+        # --- Gemini APIによる好みの解析とハイライト ---
+        if gemini_api_key and len(res_list) > 1 and len(rec_list) > 1:
+            print("-> 4. Geminiを利用して好みの本を解析し、新着図書をハイライトします...")
+            try:
+                client = genai.Client(api_key=gemini_api_key)
+                
+                # 読書記録の文字列化 (ヘッダー除く)
+                reading_history_text = "\n".join([f"- {row[1]} (著: {row[2]})" for row in rec_list[1:]])
+                
+                # 新着図書の文字列化 (ヘッダー除く)
+                new_books_text = "\n".join([f"- {row[1]} (著: {row[2]})" for row in res_list[1:]])
+                
+                prompt = f"""
+以下の「読書記録」から、ユーザーがどのようなジャンルやテーマ、著者の本を好むかを分析してください。
+その後、その分析結果に基づいて、以下の「新着図書」の中からユーザーの好みに合うおすすめの本を抽出してください。
+抽出した本の「タイトル（文字列の完全一致）」のリストをJSON形式で返してください。
+
+【読書記録】
+{reading_history_text}
+
+【新着図書】
+{new_books_text}
+
+出力は以下のJSONフォーマットのみにしてください。
+{{
+  "recommended_titles": [
+    "おすすめの本のタイトル1",
+    "おすすめの本のタイトル2"
+  ]
+}}
+"""
+                response = client.models.generate_content(
+                    model='gemini-3.1-flash-lite-preview',
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                    ),
+                )
+                
+                result_json = response.text
+                result_data = json.loads(result_json)
+                recommended_titles = result_data.get("recommended_titles", [])
+                
+                if recommended_titles:
+                    print(f"  - おすすめ本として {len(recommended_titles)} 冊が抽出されました。ハイライト処理を行います。")
+                    # 新着図書スプレッドシートのB列のタイトルと照合
+                    highlight_count = 0
+                    for i, row in enumerate(res_list[1:], start=2): # headerは1行目、データは2行目から
+                        title = row[1]
+                        if title in recommended_titles:
+                            cell_name = f"B{i}"
+                            worksheet.format(cell_name, {
+                                "backgroundColor": {
+                                    "red": 1.0,
+                                    "green": 1.0,
+                                    "blue": 0.0
+                                }
+                            })
+                            print(f"    - ハイライトしました: {title}")
+                            highlight_count += 1
+                    
+                    if highlight_count > 0:
+                        print("★ 完了: おすすめ新着図書のハイライトを行いました！")
+                    else:
+                        print("  - 抽出されたタイトルと新着図書のリストが完全に一致しませんでした。")
+                else:
+                    print("  - おすすめの本は見つかりませんでした。")
+                    
+            except Exception as e:
+                print(f"Gemini APIによる処理中にエラーが発生しました: {e}")
+        elif not gemini_api_key:
+            print("-> GEMINI_API_KEYが設定されていないため、おすすめ本のハイライト処理をスキップします。")
+
+        # --- 5. 新着図書のHTMLメール送信 ---
+        gmail_address = os.environ.get("GMAIL_ADDRESS")
+        gmail_password = os.environ.get("GMAIL_APP_PASSWORD")
         
+        if gmail_address and gmail_password and len(res_list) > 1:
+            print("-> 5. 新着図書のリストをGmailで送信します...")
+            try:
+                msg = MIMEMultipart("alternative")
+                msg["Subject"] = "【お知らせ】図書館の新着図書リスト"
+                msg["From"] = gmail_address
+                msg["To"] = gmail_address
+                
+                # 推奨タイトルが未定義の場合の回避
+                if 'recommended_titles' not in locals():
+                    recommended_titles = []
+                
+                # HTMLテーブルの構築
+                html_content = """
+                <html>
+                <head>
+                <style>
+                  table { border-collapse: collapse; width: 100%; font-family: sans-serif; }
+                  th, td { border: 1px solid #dddddd; text-align: left; padding: 8px; }
+                  th { background-color: #f2f2f2; }
+                  .highlight { background-color: #ffff99; } /* おすすめ本は黄色 */
+                </style>
+                </head>
+                <body>
+                  <h2>本日の新着図書リスト</h2>
+                  <p>※黄色でハイライトされているのは、あなたの好みに合わせたおすすめの本です。</p>
+                  <table>
+                    <tr>
+                      <th>受入日</th>
+                      <th>タイトル</th>
+                      <th>著者名</th>
+                      <th>出版者</th>
+                      <th>出版年</th>
+                    </tr>
+                """
+                
+                for row in res_list[1:]:
+                    title = row[1]
+                    tr_class = ' class="highlight"' if title in recommended_titles else ''
+                    
+                    html_content += f"""
+                    <tr{tr_class}>
+                      <td>{row[0]}</td>
+                      <td>{row[1]}</td>
+                      <td>{row[2]}</td>
+                      <td>{row[3]}</td>
+                      <td>{row[4]}</td>
+                    </tr>
+                    """
+                
+                html_content += """
+                  </table>
+                </body>
+                </html>
+                """
+                
+                part = MIMEText(html_content, "html")
+                msg.attach(part)
+                
+                print(f"  - {gmail_address} 宛てに送信中...")
+                with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+                    server.login(gmail_address, gmail_password)
+                    server.send_message(msg)
+                    
+                print("★ 完了: 新着図書のメールを送信しました！")
+            except Exception as e:
+                print(f"メールの送信中にエラーが発生しました: {e}")
+        elif not gmail_address or not gmail_password:
+            print("-> Gmailのアドレスまたはアプリパスワードが設定されていないため、メール送信をスキップします。")
+            
     except gspread.exceptions.APIError as api_err:
             print(f"スプレッドシートAPIエラー: APIの権限や共有設定が正しく行われているか確認してください。\n詳細: {api_err}")
     except Exception as e:

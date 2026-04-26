@@ -2,3 +2,4 @@ playwright
 gspread
 google-auth
 python-dotenv
+google-genai
